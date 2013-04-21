@@ -245,7 +245,7 @@ public class BattleshipServer {
 
       String message = m.getSender().getName();
       message += ": " + m.getArgs()[0];
-      escape(message);
+      message = escape(message);
       message += SEPARATOR_TOKEN + connectedPlayers;
 
       message = code + " " + message;
@@ -262,8 +262,8 @@ public class BattleshipServer {
       }
    }
 
-   private void escape(String s) {
-      //StringBuilder sb = new StringBuilder(s);
+   private String escape(String s) {
+      //System.out.println("s:"+s);
       if (s.contains(SEPARATOR_TOKEN)) {
          String[] parts = s.split(SEPARATOR_TOKEN);
          s = "";
@@ -274,6 +274,8 @@ public class BattleshipServer {
          s = s.substring(0, s.lastIndexOf("\\" + SEPARATOR_TOKEN));
          System.out.println(s);
       }
+
+      return s;
    }
 
    private void shipGenHandler() {
@@ -373,6 +375,7 @@ public class BattleshipServer {
       }
 
       public void sendMessageToPlayer(String msg) throws IOException {
+         //System.out.println("msg:"+msg);
          if (!msg.endsWith(CRLF)) {
             msg += CRLF;
          }
@@ -430,38 +433,24 @@ public class BattleshipServer {
 
       private boolean addMessageToQueue(String input) {
          boolean keepGoing = true;
-         if (input.startsWith(ELO) || input.startsWith(MSG) || input.startsWith(FIR)) {
+         if (input.startsWith(ELO) || input.startsWith(MSG) || input.startsWith(FIR) || (BYE.equals(input))) {
 
-            String cmd = input.substring(0, input.indexOf(" "));
-            String arguments = input.substring(input.indexOf(" ")).trim();
-            //System.out.println("arguments:" + arguments);
+            String cmd = "";
+            String[] args = {""};
+            if ((BYE.equals(input))) {
+               cmd = input;
+               keepGoing = false;
+            } else {
+               cmd = input.substring(0, input.indexOf(" "));
+               String arguments = input.substring(input.indexOf(" ")).trim();
 
-            String escapedSepToken = "\\" + SEPARATOR_TOKEN;
-            String escapedTmpToken = "\\" + TEMP_TOKEN;
-//System.out.println("escapedSepToken:"+escapedSepToken+"\nescapedTmpToken:"+escapedTmpToken);
+               arguments = arguments.replace("\\" + SEPARATOR_TOKEN, "\\" + TEMP_TOKEN);
+               args = arguments.split(SEPARATOR_TOKEN);
 
-            int n = arguments.indexOf(escapedSepToken);
-            while (n != -1) {
-               arguments = arguments.substring(0, n) + escapedTmpToken + arguments.substring(n + 2);
-
-               n = arguments.indexOf(escapedSepToken);
-            }
-            //System.out.println("(after )arguments:" + arguments);
-            String[] args = arguments.split(SEPARATOR_TOKEN);
-            for (int i = 0; i < args.length; i++) {
-               //args[i] = args[i].replace(TEMP_TOKEN, SEPARATOR_TOKEN);
-//System.out.println("here");
-               n = args[i].indexOf(escapedTmpToken);
-               // System.out.println("n:"+n);
-               while (n != -1) {
-                  //   System.out.println(args[i]);
-                  args[i] = args[i].substring(0, n) + SEPARATOR_TOKEN + args[i].substring(n + 2);
-
-                  n = args[i].indexOf(escapedTmpToken);
-                  //   System.out.println("n:"+n);
+               for (int i = 0; i < args.length; i++) {
+                  args[i] = args[i].replace("\\" + TEMP_TOKEN, SEPARATOR_TOKEN);
+                  System.out.println("args[" + i + "]:" + args[i]);
                }
-
-               System.out.println("args[" + i + "]:" + args[i]);
             }
 
             Message m = new Message(this, cmd, args);
@@ -469,21 +458,14 @@ public class BattleshipServer {
                msgQueue.add(m);
                msgQueue.notify();
             }
-         } else if (BYE.equals(input)) {
-            String[] x = {""};
-            Message m = new Message(this, BYE, x);
-            synchronized (msgQueue) {
-               msgQueue.add(m);
-               msgQueue.notify();
-            }
-
-            keepGoing = false;
          } else if ("".equals(input)) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "No message from client");
          } else {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Unknown message from client");
          }
-         System.out.println("keep going: " + keepGoing);
+
+         System.out.println(
+                 "keep going: " + keepGoing);
          return keepGoing;
       }
    }
