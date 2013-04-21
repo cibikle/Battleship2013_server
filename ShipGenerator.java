@@ -18,6 +18,7 @@ public class ShipGenerator {
    private int[][] map;
    private int[][][] ships;
    private int shipNumber;
+   private static final char[] alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
 
    public ShipGenerator(int numberOfPlayers, int shipsPerPlayer, int[] lengths, int mapSizeRows, int mapSizeColumns) {
       this.numberOfPlayers = numberOfPlayers;
@@ -106,9 +107,9 @@ public class ShipGenerator {
 
             int[] directionA = convertDirection(direction);
             if (placeShip(shipNum, (row + directionA[0]), (col + directionA[1]), direction, lengthLeft - 1)) {
-               ships[shipNum][lengthLeft-1][0] = row;
-               ships[shipNum][lengthLeft-1][1] = col;
-                       //ship#, compartment#, row | col = row | col
+               ships[shipNum][lengthLeft - 1][0] = row;
+               ships[shipNum][lengthLeft - 1][1] = col;
+               //ship#, compartment#, row | col = row | col
                return true;
             } else {
                //System.out.println("lower level was invalid");
@@ -128,7 +129,6 @@ public class ShipGenerator {
    }
 
    private int pickDirection(Random r) {
-
       return r.nextInt(4);//0 == north (up), 1 == south (down), 2 == east (right), 3 == west (left)
    }
 
@@ -182,16 +182,32 @@ public class ShipGenerator {
    }
 
    public String getMapAsString() {
-      String s = "";
+      String s = "   ";
+
+      for (int i = 0; i < map[0].length; i++) {
+         String c = i + "";
+         int padNeeded = 3 - c.length();
+         for (int m = 0; m < padNeeded; m++) {
+            c = " " + c;
+         }
+         s += c;
+      }
+      s += '\n';
 
       for (int i = 0; i < map.length; i++) {
+         String c = alphabet[i] + "";
+         int padNeeded = 3 - c.length();
+         for (int m = 0; m < padNeeded; m++) {
+            c = " " + c;
+         }
+         s += c;
          for (int j = 0; j < map[0].length; j++) {
-            String c = ".";
+            c = ".";
             int x = map[i][j];
             if (x > -1) {
                c = x + "";
             }
-            int padNeeded = 3 - c.length();
+            padNeeded = 3 - c.length();
             for (int m = 0; m < padNeeded; m++) {
                c = " " + c;
             }
@@ -202,20 +218,20 @@ public class ShipGenerator {
 
       return s;
    }
-   
+
    public String[] getShipsAsStrings() {
       String shipStrings[] = new String[ships.length];
 
-      for(int i = 0; i < ships.length; i++) {
+      for (int i = 0; i < ships.length; i++) {
          shipStrings[i] = "";
-         for(int j = 0; j < ships[0].length; j++) {
-            if(ships[i][j][0] > -1) {
+         for (int j = 0; j < ships[0].length; j++) {
+            if (ships[i][j][0] > -1) {
                shipStrings[i] += ships[i][j][0];
                shipStrings[i] += SEPARATOR_TOKEN;
                shipStrings[i] += ships[i][j][1];
-               
-               if(j+1 < ships[0].length) {
-                  if(ships[i][j][0] > -1) {
+
+               if (j + 1 < ships[0].length) {
+                  if (ships[i][j][0] > -1) {
                      shipStrings[i] += SEPARATOR_TOKEN;
                   }
                }
@@ -234,15 +250,15 @@ public class ShipGenerator {
       int rows = 26;
       int cols = 39;
       ShipGenerator sg = new ShipGenerator(players, shipsPerPlayer, lens, rows, cols);
-      //System.out.println(sg.getMapAsString());
-      
+      System.out.println(sg.getMapAsString());
+
       long endMillis = System.currentTimeMillis();
-		double durationSecs = ((double)(endMillis - startMillis))/1000d;
-		System.out.println("elapsed time in seconds: "+durationSecs);
-      
- /*     String[] fleets = sg.getShipsAsStrings();
-      for(int i = 0; i < fleets.length; i++) {
-         System.out.println("ship#"+i+": "+fleets[i]);
-      }*/
+      double durationSecs = ((double) (endMillis - startMillis)) / 1000d;
+      System.out.println("elapsed time in seconds: " + durationSecs);
+
+      /*     String[] fleets = sg.getShipsAsStrings();
+       for(int i = 0; i < fleets.length; i++) {
+       System.out.println("ship#"+i+": "+fleets[i]);
+       }*/
    }
 }
