@@ -121,7 +121,7 @@ public class BattleshipServer {
                signIn(m);
                
                if(gameStarted) {
-                  //signal start of game
+                  startGame();
                }
             } else if (m.getCommand().equals(MSG)) {
                System.out.println("MSG received");
