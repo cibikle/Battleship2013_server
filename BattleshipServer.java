@@ -67,6 +67,7 @@ public class BattleshipServer {
    private Thread receptionistThread;
    private ShipGenerator shipGen;
    private Player server;
+   private boolean gameStarted = false;
 
    public static void main(String[] args) {
       if (args.length == 1) {
@@ -114,12 +115,14 @@ public class BattleshipServer {
          while (m != null) {
             if (BYE.equals(m.getCommand())) {
                System.out.println("BYE received");
-
                signOut(m);
-
             } else if (m.getCommand().equals(ELO)) {
                System.out.println("ELO received");
                signIn(m);
+               
+               if(gameStarted) {
+                  //signal start of game
+               }
             } else if (m.getCommand().equals(MSG)) {
                System.out.println("MSG received");
                System.out.println(Arrays.deepToString(m.getArgs()));
@@ -144,21 +147,42 @@ public class BattleshipServer {
          }
       }
    }
+   
+   private void startGame() {
+      for(Player p : players) {
+         try {
+            p.sendMessageToPlayer(START_GAME + CRLF);
+         } catch (IOException ex) {
+            Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+         }
+      }
+   }
 
    private void signOut(Message m) {
       try {
-         //cleanup 'n' stuff:
-         //tell them 900 or whatever
-         //clear his data
-         //tell the others
-
-         m.getSender().sendMessageToPlayer(BYE + " Disconnect (leaving)");
+         m.getSender().sendMessageToPlayer(BYE + " Disconnect (leaving)" + CRLF);
       } catch (IOException ex) {
          Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
       }
 
-      //remove ships
-      //remove player
+      Ship[] tmpShips = m.getSender().getShips();
+      if (gameStarted) {
+         for (int i = 0; i < tmpShips.length; i++) {
+            tmpShips[i].setSunk(true);
+         }
+      } else {
+         //reset ships to have no owner
+         for (int i = 0; i < tmpShips.length; i++) {
+            tmpShips[i].setOwner("");
+         }
+         //null the player in Players
+         for (int i = 0; i < players.length; i++) {
+            if (players[i] == m.getSender()) {
+               players[i] = null;
+               i = players.length;
+            }
+         }
+      }
 
       String[] disconMsg = {"Player " + m.getSender().getName() + " disconnected."};
       sendMsgToPlayers(new Message(server, MSG, disconMsg));
@@ -166,32 +190,41 @@ public class BattleshipServer {
 
    private void signIn(Message m) {
       System.out.println(m);
-      if (connectedPlayers < numberOfPlayers || m.getSender().isFirstPlayer()) {
-         if (m.getSender().isFirstPlayer()) {
-            numberOfPlayers = Integer.parseInt(m.getArgs()[1]);
-            players = new Player[numberOfPlayers];
-            ships = new Ship[numberOfPlayers * shipsPerPlayer];
-            System.out.println("#players:" + numberOfPlayers + "; sPP:" + shipsPerPlayer + "; ships:" + ships.length);
-            shipGenHandler();
-         }
 
+      if (m.getSender().isFirstPlayer()) {
+         numberOfPlayers = Integer.parseInt(m.getArgs()[1]);
+         players = new Player[numberOfPlayers];
+         ships = new Ship[numberOfPlayers * shipsPerPlayer];
+         System.out.println("#players:" + numberOfPlayers + "; sPP:" + shipsPerPlayer + "; ships:" + ships.length);
+         shipGenHandler();
+      }
+
+      if (connectedPlayers < numberOfPlayers) {
          if (!nameTaken(m.getArgs()[0])) {
             m.getSender().setName(m.getArgs()[0]);
-            players[connectedPlayers] = m.getSender();
-            connectedPlayers++;
+            int playerSlot = findFirstOpenPlace();
+            try {
+               players[playerSlot] = m.getSender();
+            } catch (ArrayIndexOutOfBoundsException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, "Somehow a player was admitted to the game when there was no room.", e);
 
-            //System.out.println("# of connected players:" + connectedPlayers);
+               try {
+                  m.getSender().sendMessageToPlayer(ACK_ELO_REJECT_NOROOM + " No Room or Game Has Started" + CRLF);
+               } catch (IOException ex) {
+                  Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+               }
+               return;
+            }
+            connectedPlayers++;
 
             String[] args = {"Player " + m.getSender().getName() + " joined the game", connectedPlayers + ""};
             sendMsgToPlayers(new Message(server, MSG, args));
 
             Ship[] tmpShips = new Ship[shipsPerPlayer];
-//System.out.println("tmpShips:"+tmpShips.length+"; ships:"+ships.length);
             for (int i = 0; i < tmpShips.length; i++) {
-               // System.out.println(i + ((connectedPlayers-1) * shipsPerPlayer));
-               tmpShips[i] = ships[i + ((connectedPlayers - 1) * shipsPerPlayer)];
+               tmpShips[i] = ships[i + ((playerSlot) * shipsPerPlayer)];
             }
-            players[connectedPlayers - 1].setShips(tmpShips);
+            players[playerSlot].setShips(tmpShips);
 
             String message = ACK_ELO_ACCEPT + " " + numberOfPlayers
                     + SEPARATOR_TOKEN + firingDelay + SEPARATOR_TOKEN
@@ -201,27 +234,39 @@ public class BattleshipServer {
                message += SEPARATOR_TOKEN + t.getLocation();
             }
 
-//System.out.println("ELO ACK:"+message);
-
             try {
-               m.getSender().sendMessageToPlayer(message);
+               m.getSender().sendMessageToPlayer(message + CRLF);
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
+            
+            if(connectedPlayers == numberOfPlayers) {
+               gameStarted = true;
+            }
          } else {
             try {
-               m.getSender().sendMessageToPlayer(ACK_ELO_REJECT_NAMETAKEN + " Name Taken");
+               m.getSender().sendMessageToPlayer(ACK_ELO_REJECT_NAMETAKEN + " Name Taken" + CRLF);
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
          }
       } else {
          try {
-            m.getSender().sendMessageToPlayer(ACK_ELO_REJECT_NOROOM + " No Room or Game Has Started");
+            m.getSender().sendMessageToPlayer(ACK_ELO_REJECT_NOROOM + " No Room or Game Has Started" + CRLF);
          } catch (IOException ex) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
          }
       }
+   }
+
+   private int findFirstOpenPlace() {
+      for (int i = 0; i < players.length; i++) {
+         if (players[i] == null) {
+            return i;
+         }
+      }
+
+      return -1;
    }
 
    private boolean nameTaken(String name) {
@@ -258,6 +303,7 @@ public class BattleshipServer {
          } catch (IOException ex) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
          } catch (NullPointerException ex2) {
+            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Player not connected", ex2);
          }
       }
    }
@@ -515,6 +561,10 @@ public class BattleshipServer {
 
       public void setCompartments(Compartment[] compartments) {
          sections = compartments;
+      }
+
+      public Compartment[] getCompartments() {
+         return sections;
       }
 
       public String getLocation() {
