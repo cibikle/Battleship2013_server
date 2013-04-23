@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.Arrays;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Level;
@@ -43,10 +44,11 @@ public class BattleshipServer {
    public static final String GAMEOVER_PLAYERSLEFT = "990";
    public static final String GAMEOVER_WON = "999";
    public static final String CRLF = "\r\n";
+   public static final String PROTOTCOL_VERSION = "bsP/2013";
    /* members */
    private static final String SEPARATOR_TOKEN = "&";
    private static final String TEMP_TOKEN = "#";
-   private static final char[] alphabet = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+   private static final String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
    private static final int MAP_WDITH = 39;//number of columns
    private static final int MAP_HEIGHT = 26;//number of rows
    private int firingDelay = 5000;//in millis, so 5 seconds
@@ -62,12 +64,27 @@ public class BattleshipServer {
    private Player[] players = null;
    private Ship[] ships = null;
    private Compartment[][] map;
-   private ConcurrentLinkedQueue<Message> msgQueue;
+   private final ConcurrentLinkedQueue<Message> msgQueue;
    private ConnectionAccepter receptionist;
    private Thread receptionistThread;
    private ShipGenerator shipGen;
    private Player server;
    private boolean gameStarted = false;
+   private int playersOut = 0;
+   private int highestScore = 0;
+   private final int POINTS_HIT = 1;
+   private final int POINTS_SUNK = 1;
+   private final int POINTS_LAST_SUNK = 1;
+//   private final int POINTS_SELFHIT = 0;
+//   private final int POINTS_MISS = 0;
+   private final int PENALTY_HIT = 0;
+   private final int PENALTY_SUNK = 0;
+   private final int PENALTY_LAST_SUNK = 0;
+   private final int PENALTY_SELFHIT = 0;
+   private final int PENALTY_MISS = 0;
+   private static final boolean GAME_WON = true;
+   private static final boolean GAME_ABANDONDED = false;
+   private boolean gameEnded = false;
 
    public static void main(String[] args) {
       if (args.length == 1) {
@@ -102,11 +119,14 @@ public class BattleshipServer {
       map = new Compartment[MAP_HEIGHT][MAP_WDITH];//rows THEN columns
       msgQueue = new ConcurrentLinkedQueue<Message>();
       listenSocket = new ServerSocket(port);
+      runAcceptor();
+      handleQueue();
+   }
+
+   private void runAcceptor() {
       receptionist = new ConnectionAccepter(listenSocket);
       receptionistThread = new Thread(receptionist);
       receptionistThread.start();
-
-      handleQueue();
    }
 
    private void handleQueue() {
@@ -119,8 +139,8 @@ public class BattleshipServer {
             } else if (m.getCommand().equals(ELO)) {
                System.out.println("ELO received");
                signIn(m);
-               
-               if(gameStarted) {
+
+               if (gameStarted) {
                   startGame();
                }
             } else if (m.getCommand().equals(MSG)) {
@@ -132,11 +152,17 @@ public class BattleshipServer {
                System.out.println("FIR received");
                System.out.println(Arrays.deepToString(m.getArgs()));
 
-               //checking 'n' such
+               fire(m);
             }
 
             m = msgQueue.poll();
          }
+         
+         if(gameEnded) {
+            this.run = false;
+            continue;
+         }
+         
          try {
             System.out.println(Thread.currentThread().getName() + ": About to wait");
             synchronized (msgQueue) {
@@ -147,22 +173,163 @@ public class BattleshipServer {
          }
       }
    }
-   
-   private void startGame() {
-      for(Player p : players) {
+
+   private void fire(Message m) {
+      //get coordinates from message
+      //lookup
+      //if hit
+      //set attackermsg to 'hit'
+      //set compartment to hit
+      //set defendermsg to 'hit'
+      //check if ship is sunk
+      //set ship to sunk
+      //set attackermsg to 'sunk'
+      //set defendermsg to 'sunk'
+      //check if all ships sunk
+      //set defendermsg to 'all-sunk'
+      //check if ship is shooter's
+      //set attackermsg to 'self-hit'
+      //inform shipOwner
+      //else
+      //set attackermsg to 'miss'
+      //inform attacker
+
+      if (!gameStarted) {
+         System.out.println("game not started");
+         return;
+      }
+
+      System.out.println(Arrays.deepToString(m.getArgs()));
+      
+      String attackerMsg;
+      String defenderMsg;
+      
+      int attackerPoints;
+      int defenderPoints;
+      
+ //     boolean selfHit;
+
+      int row = alphabet.indexOf(m.getArgs()[0]);
+      int col = Integer.parseInt(m.getArgs()[1]);//check that number
+      System.out.println("map:["+row+"]["+col+"]:"+map[row][col]);
+      if(map[row][col] != null) {//if it's a hit
+         System.out.println("HIT");
+         map[row][col].setHit();
+         
+         String shipOwnerName = map[row][col].getShip().getOwner();
+         Player shipOwner = lookupPlayer(shipOwnerName);
+
+         if(map[row][col].getShip().isSunk()) {
+            System.out.println("SUNK");
+            attackerMsg = ACK_FIR_SUNK;
+            attackerPoints = POINTS_SUNK;
+            if (shipOwner.allShipsSunk()) {
+               System.out.println("SUNK ALL");
+               attackerPoints = POINTS_LAST_SUNK;
+               defenderMsg = SHIPS_SUNK_ALL;
+               defenderPoints = PENALTY_LAST_SUNK;
+               
+               playersOut++;
+               if(playersOut == (connectedPlayers - 1)) {
+                  endGame(GAME_WON);
+               }
+            } else {
+               defenderMsg = SHIP_SUNK;
+               defenderPoints = PENALTY_SUNK;
+            }
+         }  else {
+            attackerMsg = ACK_FIR_HIT;
+            attackerPoints = POINTS_HIT;
+            defenderMsg = SHIP_HIT;
+            defenderPoints = PENALTY_HIT;
+         }
+         
+         if (shipOwnerName.equals(m.getSender().getName())) {
+            System.out.println("SELFHIT");
+            attackerMsg = ACK_FIR_SELFHIT;
+            attackerPoints = PENALTY_SELFHIT;
+         }
+         shipOwner.updateScore(defenderPoints);
          try {
-            p.sendMessageToPlayer(START_GAME + CRLF);
+            shipOwner.sendMessageToPlayer(defenderMsg + " " + m.getArgs()[0] +
+                    SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN +
+                    shipOwner.getScore() + CRLF);
          } catch (IOException ex) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+         }
+         
+         if (shipOwner.getScore() > highestScore) {
+            highestScore = shipOwner.getScore();
+         }
+      } else {//it's a miss
+         attackerMsg = ACK_FIR_MISS;
+         attackerPoints = PENALTY_MISS;
+      }
+      
+      m.getSender().updateScore(attackerPoints);
+      try {
+         String c = attackerMsg + " " + m.getArgs()[0] +
+                       SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN +
+                       m.getSender().getScore();
+         m.getSender().sendMessageToPlayer(c + CRLF);
+      } catch (IOException ex) {
+         Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+      }
+      
+      if(m.getSender().getScore() > highestScore) {
+         highestScore = m.getSender().getScore();
+      }
+   }
+   
+   private Player lookupPlayer(String name) {
+      for(Player t : players) {
+         if(t.getName().equals(name)) {
+            return t;
+         }
+      }
+      
+      return null;
+   }
+   
+   private void endGame(boolean endType) {
+      gameStarted = false;
+      gameEnded = true;
+      String msg;
+      
+      if(endType == GAME_WON) {//true = someone won; false = everyone else left
+         
+      } else {
+         msg = GAMEOVER_PLAYERSLEFT;
+      }
+      
+      //figure out which message to dispatch
+      
+      //figure out how to reset the server for the next game
+   }
+
+   private void startGame() {
+      for (Player p : players) {
+         if (p != null) {
+            try {
+               p.sendMessageToPlayer(START_GAME + CRLF);
+            } catch (IOException ex) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+            }
          }
       }
    }
 
    private void signOut(Message m) {
       try {
-         m.getSender().sendMessageToPlayer(BYE + " Disconnect (leaving)" + CRLF);
+         m.getSender().sendMessageToPlayer(ACK_BYE + " Disconnect (leaving)" + CRLF);
       } catch (IOException ex) {
          Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+      }
+
+      connectedPlayers--;
+      
+      if(connectedPlayers == 1 && gameStarted) {
+         endGame(GAME_ABANDONDED);
       }
 
       Ship[] tmpShips = m.getSender().getShips();
@@ -177,7 +344,7 @@ public class BattleshipServer {
          }
          //null the player in Players
          for (int i = 0; i < players.length; i++) {
-            if (players[i] == m.getSender()) {
+            if (players[i].getName().equals(m.getSender().getName())) {
                players[i] = null;
                i = players.length;
             }
@@ -191,7 +358,9 @@ public class BattleshipServer {
    private void signIn(Message m) {
       System.out.println(m);
 
-      if (m.getSender().isFirstPlayer()) {
+      if (isFirstPlayer) {
+         System.out.println("I am the first player to send an ELO"); 
+         isFirstPlayer = false;
          numberOfPlayers = Integer.parseInt(m.getArgs()[1]);
          players = new Player[numberOfPlayers];
          ships = new Ship[numberOfPlayers * shipsPerPlayer];
@@ -239,9 +408,10 @@ public class BattleshipServer {
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
-            
-            if(connectedPlayers == numberOfPlayers) {
+
+            if (connectedPlayers == numberOfPlayers) {
                gameStarted = true;
+               System.out.println("Game starting");
             }
          } else {
             try {
@@ -298,12 +468,12 @@ public class BattleshipServer {
       //System.out.println("message:" + message);
 
       for (Player p : players) {
-         try {
-            p.sendMessageToPlayer(message + CRLF);
-         } catch (IOException ex) {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
-         } catch (NullPointerException ex2) {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Player not connected", ex2);
+         if (p != null) {
+            try {
+               p.sendMessageToPlayer(message + CRLF);
+            } catch (IOException ex) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, "Could not reach player", ex);
+            }
          }
       }
    }
@@ -336,6 +506,8 @@ public class BattleshipServer {
 
          for (int j = 0; j < compartments.length; j++) {
             compartments[j] = new Compartment(Integer.parseInt(pairs[j * 2]), Integer.parseInt(pairs[j * 2 + 1]), ships[i]);
+            
+            map[compartments[j].getRow()][compartments[j].getCol()] = compartments[j];
          }
 
          ships[i].setCompartments(compartments);
@@ -357,12 +529,9 @@ public class BattleshipServer {
       public void run() {
          while (run) {
             try {
-               Socket s = listenSocket.accept();
+               Socket s = listen.accept();
                s.setSoTimeout(timeout);
-               new Thread(new Player(s, isFirstPlayer)).start();
-               if (isFirstPlayer) {
-                  isFirstPlayer = false;
-               }
+               new Thread(new Player(s)).start();
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
@@ -371,22 +540,22 @@ public class BattleshipServer {
    }
 
 //------PLAYER class------//
-   private class Player implements Runnable {
+   private final class Player implements Runnable {
 
       private Socket socket;
       private String name;
-      private int score;
+      private int score = 0;
       private Ship[] fleet;
       private BufferedReader fromPlayer;
       private DataOutputStream toPlayer;
-      private boolean isFirstPlayer;
+      private boolean allShipsSunk = false;
 
-      public Player(Socket socket, boolean isFirst) throws IOException {
-         this.isFirstPlayer = isFirst;
+      public Player(Socket socket) throws IOException {
          this.socket = socket;
          fromPlayer = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
          toPlayer = new DataOutputStream(this.socket.getOutputStream());
-         score = 0;
+         
+         sendMessageToPlayer(ACK_CONNECTION + " " + PROTOTCOL_VERSION + CRLF);
       }
 
       public Player() {
@@ -425,9 +594,11 @@ public class BattleshipServer {
          if (!msg.endsWith(CRLF)) {
             msg += CRLF;
          }
-         toPlayer.writeBytes(msg);
+         if(!socket.isClosed()) {
+            toPlayer.writeBytes(msg);
+         }
 
-         if (msg.startsWith(BYE)) {
+         if (msg.startsWith(ACK_BYE)) {
             toPlayer.flush();
             close();
          }
@@ -443,9 +614,19 @@ public class BattleshipServer {
             s.setOwner(name);
          }
       }
-
-      public boolean isFirstPlayer() {
-         return isFirstPlayer;
+      
+      public boolean allShipsSunk() {
+         if(!allShipsSunk) {
+            boolean evenASingleShipRemainsAfloat = false;
+            for(Ship s : fleet) {
+               if(!s.isSunk()) {
+                  evenASingleShipRemainsAfloat = true;
+               }
+            }
+            allShipsSunk = !evenASingleShipRemainsAfloat;
+         }
+         
+         return allShipsSunk;
       }
 
       @Override
@@ -457,14 +638,20 @@ public class BattleshipServer {
                input = listenToPlayer();
 
                System.out.println(input);
+               
+               if(input == null) {
+                  input = BYE;
+               }
+            } catch (SocketException e) {
+               System.out.println("here!");
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, e);
+               input = BYE;
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
-               input = "";
             }
 
             run = addMessageToQueue(input);
          }
-
       }
 
       private void close() {
@@ -476,12 +663,13 @@ public class BattleshipServer {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
          }
       }
-
+      
       private boolean addMessageToQueue(String input) {
+         System.out.println("input:"+input);
          boolean keepGoing = true;
          if (input.startsWith(ELO) || input.startsWith(MSG) || input.startsWith(FIR) || (BYE.equals(input))) {
 
-            String cmd = "";
+            String cmd;
             String[] args = {""};
             if ((BYE.equals(input))) {
                cmd = input;
@@ -507,7 +695,7 @@ public class BattleshipServer {
          } else if ("".equals(input)) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "No message from client");
          } else {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Unknown message from client");
+            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Unknown message from client: {0}", input);
          }
 
          System.out.println(
@@ -541,6 +729,7 @@ public class BattleshipServer {
          return args;
       }
 
+      @Override
       public String toString() {
          return sender.getName() + ": " + command + " " + Arrays.deepToString(args);
       }
@@ -571,7 +760,7 @@ public class BattleshipServer {
          String coordinates = "";
 
          for (int i = 0; i < sections.length; i++) {
-            coordinates += alphabet[sections[i].getRow()] + "&" + sections[i].getCol() + "&";
+            coordinates += alphabet.charAt(sections[i].getRow()) + "&" + sections[i].getCol() + "&";
          }
 
          coordinates = coordinates.substring(0, coordinates.length() - 1);
@@ -636,6 +825,13 @@ public class BattleshipServer {
          }
 
          return hit;
+      }
+      
+      public void setHit() {
+         if (!isHit) {
+            isHit = true;
+            ship.incrementHits();
+         }
       }
 
       public int getRow() {
