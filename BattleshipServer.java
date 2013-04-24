@@ -114,11 +114,14 @@ public class BattleshipServer {
       server = new Player();
       server.setName("SERVER");
 
-      map = new Compartment[MAP_HEIGHT][MAP_WIDTH];//rows THEN columns
       msgQueue = new ConcurrentLinkedQueue<Message>();
       listenSocket = new ServerSocket(port);
       runAcceptor();
       handleQueue();
+   }
+   
+   private void mapInit() {
+      map = new Compartment[MAP_HEIGHT][MAP_WIDTH];//rows THEN columns
    }
 
    private void runAcceptor() {
@@ -295,7 +298,17 @@ public class BattleshipServer {
 
       sendMessageToPlayers(msg);
 
-      System.exit(0);
+//      System.exit(0);
+      
+      resetServer();
+   }
+   
+   private void resetServer() {
+      mapInit();
+      isFirstPlayer = true;
+      gameStarted = false;
+      gameEnded = false;
+      gameStartAnnounced = false;
    }
 
    private String tallyScores() {//expand later for all players' scores
@@ -329,10 +342,10 @@ public class BattleshipServer {
          connectedPlayers--;
 
          if (connectedPlayers == 1 && gameStarted) {
-            System.out.println("&&&&&&");
+            //System.out.println("&&&&&&");
             endGame(GAME_ABANDONDED);
-         } else if (connectedPlayers == 0 && isFirstPlayer == false) {
-            endGame(GAME_ABANDONDED);
+         } else if (connectedPlayers == 0) {
+            resetServer();
          }
 
          Ship[] tmpShips = m.getSender().getShips();
