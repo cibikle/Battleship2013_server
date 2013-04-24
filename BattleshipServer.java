@@ -113,6 +113,7 @@ public class BattleshipServer {
    public BattleshipServer() throws IOException {
       server = new Player();
       server.setName("SERVER");
+      mapInit();
 
       msgQueue = new ConcurrentLinkedQueue<Message>();
       listenSocket = new ServerSocket(port);
@@ -206,7 +207,7 @@ public class BattleshipServer {
       int row = alphabet.indexOf(m.getArgs()[0]);
       int col = Integer.parseInt(m.getArgs()[1]);
       System.out.println("map:[" + alphabet.charAt(row) + "][" + col + "]:" + map[row][col]);
-      if (map[row][col] != null && !map[row][col].isHit()) {//if it's a hit
+      if (map[row][col] != null && !map[row][col].isHit() && !map[row][col].getShip().friendlyFire(m.getSender().getName())) {//if it's a hit
          System.out.println("HIT");
          map[row][col].setHit();
 
@@ -752,7 +753,7 @@ public class BattleshipServer {
       }
 
       private String[] splitArguments(String cmd, String args) {
-         String[] argsA = null;
+         String[] argsA;
          if (ELO.equals(cmd)) {
             args = args.replace("\\" + SEPARATOR_TOKEN, "\\" + TEMP_TOKEN);
 
@@ -914,6 +915,10 @@ public class BattleshipServer {
 
       public String getOwner() {
          return owner;
+      }
+      
+      public boolean friendlyFire(String name) {
+         return owner.equals(name);
       }
 
       public void incrementHits() {
