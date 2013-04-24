@@ -45,11 +45,12 @@ public class BattleshipServer {
    public static final String GAMEOVER_WON = "999";
    public static final String CRLF = "\r\n";
    public static final String PROTOTCOL_VERSION = "bsP/2013";
+   public static final int lengthOfCmds = 3;
    /* members */
    private static final String SEPARATOR_TOKEN = "&";
    private static final String TEMP_TOKEN = "#";
    private static final String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-   private static final int MAP_WDITH = 39;//number of columns
+   private static final int MAP_WIDTH = 39;//number of columns
    private static final int MAP_HEIGHT = 26;//number of rows
    private int firingDelay = 5000;//in millis, so 5 seconds
    private static int timeout = 180000;
@@ -85,6 +86,7 @@ public class BattleshipServer {
    private static final boolean GAME_WON = true;
    private static final boolean GAME_ABANDONDED = false;
    private boolean gameEnded = false;
+   private boolean gameStartAnnounced = false;
 
    public static void main(String[] args) {
       if (args.length == 1) {
@@ -99,24 +101,20 @@ public class BattleshipServer {
          System.out.println("Using default port " + port);
       }
 
-      BattleshipServer bss;
-      while (true) {
-         bss = null;
-         try {
-            bss = new BattleshipServer();
-         } catch (IOException ex) {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
-            System.exit(1);
-         }
+      BattleshipServer bss = null;
+      try {
+         bss = new BattleshipServer();
+      } catch (IOException ex) {
+         Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
+         System.exit(1);
       }
-
    }
 
    public BattleshipServer() throws IOException {
       server = new Player();
       server.setName("SERVER");
 
-      map = new Compartment[MAP_HEIGHT][MAP_WDITH];//rows THEN columns
+      map = new Compartment[MAP_HEIGHT][MAP_WIDTH];//rows THEN columns
       msgQueue = new ConcurrentLinkedQueue<Message>();
       listenSocket = new ServerSocket(port);
       runAcceptor();
@@ -140,7 +138,7 @@ public class BattleshipServer {
                System.out.println("ELO received");
                signIn(m);
 
-               if (gameStarted) {
+               if (gameStarted && !gameStartAnnounced) {
                   startGame();
                }
             } else if (m.getCommand().equals(MSG)) {
@@ -157,12 +155,7 @@ public class BattleshipServer {
 
             m = msgQueue.poll();
          }
-         
-         if(gameEnded) {
-            this.run = false;
-            continue;
-         }
-         
+
          try {
             System.out.println(Thread.currentThread().getName() + ": About to wait");
             synchronized (msgQueue) {
@@ -200,26 +193,24 @@ public class BattleshipServer {
       }
 
       System.out.println(Arrays.deepToString(m.getArgs()));
-      
+
       String attackerMsg;
       String defenderMsg;
-      
+
       int attackerPoints;
       int defenderPoints;
-      
- //     boolean selfHit;
 
       int row = alphabet.indexOf(m.getArgs()[0]);
-      int col = Integer.parseInt(m.getArgs()[1]);//check that number
-      System.out.println("map:["+row+"]["+col+"]:"+map[row][col]);
-      if(map[row][col] != null) {//if it's a hit
+      int col = Integer.parseInt(m.getArgs()[1]);
+      System.out.println("map:[" + alphabet.charAt(row) + "][" + col + "]:" + map[row][col]);
+      if (map[row][col] != null && !map[row][col].isHit()) {//if it's a hit
          System.out.println("HIT");
          map[row][col].setHit();
-         
+
          String shipOwnerName = map[row][col].getShip().getOwner();
          Player shipOwner = lookupPlayer(shipOwnerName);
 
-         if(map[row][col].getShip().isSunk()) {
+         if (map[row][col].getShip().isSunk()) {
             System.out.println("SUNK");
             attackerMsg = ACK_FIR_SUNK;
             attackerPoints = POINTS_SUNK;
@@ -228,22 +219,22 @@ public class BattleshipServer {
                attackerPoints = POINTS_LAST_SUNK;
                defenderMsg = SHIPS_SUNK_ALL;
                defenderPoints = PENALTY_LAST_SUNK;
-               
+
                playersOut++;
-               if(playersOut == (connectedPlayers - 1)) {
+               if (playersOut == (connectedPlayers - 1)) {
                   endGame(GAME_WON);
                }
             } else {
                defenderMsg = SHIP_SUNK;
                defenderPoints = PENALTY_SUNK;
             }
-         }  else {
+         } else {
             attackerMsg = ACK_FIR_HIT;
             attackerPoints = POINTS_HIT;
             defenderMsg = SHIP_HIT;
             defenderPoints = PENALTY_HIT;
          }
-         
+
          if (shipOwnerName.equals(m.getSender().getName())) {
             System.out.println("SELFHIT");
             attackerMsg = ACK_FIR_SELFHIT;
@@ -251,13 +242,13 @@ public class BattleshipServer {
          }
          shipOwner.updateScore(defenderPoints);
          try {
-            shipOwner.sendMessageToPlayer(defenderMsg + " " + m.getArgs()[0] +
-                    SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN +
-                    shipOwner.getScore() + CRLF);
+            shipOwner.sendMessageToPlayer(defenderMsg + " " + m.getArgs()[0]
+                    + SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN
+                    + shipOwner.getScore() + CRLF);
          } catch (IOException ex) {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
          }
-         
+
          if (shipOwner.getScore() > highestScore) {
             highestScore = shipOwner.getScore();
          }
@@ -265,101 +256,118 @@ public class BattleshipServer {
          attackerMsg = ACK_FIR_MISS;
          attackerPoints = PENALTY_MISS;
       }
-      
+
       m.getSender().updateScore(attackerPoints);
       try {
-         String c = attackerMsg + " " + m.getArgs()[0] +
-                       SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN +
-                       m.getSender().getScore();
+         String c = attackerMsg + " " + m.getArgs()[0]
+                 + SEPARATOR_TOKEN + m.getArgs()[1] + SEPARATOR_TOKEN
+                 + m.getSender().getScore();
          m.getSender().sendMessageToPlayer(c + CRLF);
       } catch (IOException ex) {
          Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
       }
-      
-      if(m.getSender().getScore() > highestScore) {
+
+      if (m.getSender().getScore() > highestScore) {
          highestScore = m.getSender().getScore();
       }
    }
-   
+
    private Player lookupPlayer(String name) {
-      for(Player t : players) {
-         if(t.getName().equals(name)) {
+      for (Player t : players) {
+         if (t.getName().equals(name)) {
             return t;
          }
       }
-      
+
       return null;
    }
-   
+
    private void endGame(boolean endType) {
       gameStarted = false;
       gameEnded = true;
       String msg;
-      
-      if(endType == GAME_WON) {//true = someone won; false = everyone else left
-         
+
+      if (endType == GAME_WON) {//true = someone won; false = everyone else left
+         msg = GAMEOVER_WON + " " + tallyScores();
       } else {
          msg = GAMEOVER_PLAYERSLEFT;
       }
-      
-      //figure out which message to dispatch
-      
-      //figure out how to reset the server for the next game
+
+      sendMessageToPlayers(msg);
+
+      System.exit(0);
+   }
+
+   private String tallyScores() {//expand later for all players' scores
+      String scorer = "";
+      int highest = 0;
+      for (Player p : players) {
+         if (p != null && p.getScore() > highest) {
+            highest = p.getScore();
+            scorer = p.getName();
+         }
+      }
+      scorer += " - " + highest;
+
+      return scorer;
    }
 
    private void startGame() {
-      for (Player p : players) {
-         if (p != null) {
-            try {
-               p.sendMessageToPlayer(START_GAME + CRLF);
-            } catch (IOException ex) {
-               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
-            }
-         }
-      }
+      sendMessageToPlayers(START_GAME);
+      gameStartAnnounced = true;
    }
 
    private void signOut(Message m) {
       try {
-         m.getSender().sendMessageToPlayer(ACK_BYE + " Disconnect (leaving)" + CRLF);
+         m.getSender().sendMessageToPlayer(ACK_BYE + CRLF);
       } catch (IOException ex) {
          Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
       }
 
-      connectedPlayers--;
-      
-      if(connectedPlayers == 1 && gameStarted) {
-         endGame(GAME_ABANDONDED);
-      }
+      if (m.getSender().isRegistered()) {
+         System.out.println(m.getSender().getName() + " is registered");
+         connectedPlayers--;
 
-      Ship[] tmpShips = m.getSender().getShips();
-      if (gameStarted) {
-         for (int i = 0; i < tmpShips.length; i++) {
-            tmpShips[i].setSunk(true);
+         if (connectedPlayers == 1 && gameStarted) {
+            System.out.println("&&&&&&");
+            endGame(GAME_ABANDONDED);
+         } else if (connectedPlayers == 0 && isFirstPlayer == false) {
+            endGame(GAME_ABANDONDED);
          }
-      } else {
-         //reset ships to have no owner
-         for (int i = 0; i < tmpShips.length; i++) {
-            tmpShips[i].setOwner("");
+
+         Ship[] tmpShips = m.getSender().getShips();
+         if (gameStarted) {
+            for (int i = 0; i < tmpShips.length; i++) {
+               tmpShips[i].setSunk(true);
+            }
+         } else {
+            //reset ships to have no owner
+            for (int i = 0; i < tmpShips.length; i++) {
+               tmpShips[i].setOwner("");
+            }
          }
+
          //null the player in Players
          for (int i = 0; i < players.length; i++) {
-            if (players[i].getName().equals(m.getSender().getName())) {
+            if (players[i] != null && players[i].getName().equals(m.getSender().getName())) {
+               System.out.println(m.getSender().getName() + " removed");
                players[i] = null;
                i = players.length;
             }
          }
-      }
 
-      String[] disconMsg = {"Player " + m.getSender().getName() + " disconnected."};
-      sendMsgToPlayers(new Message(server, MSG, disconMsg));
+         m.getSender().setRegistered(false);
+
+         String[] disconMsg = {"Player " + m.getSender().getName() + " disconnected."};
+         sendMsgToPlayers(new Message(server, MSG, disconMsg));
+      }
    }
 
    private void signIn(Message m) {
       System.out.println(m);
 
       if (isFirstPlayer) {
-         System.out.println("I am the first player to send an ELO"); 
+         System.out.println("I am the first player to send an ELO");
          isFirstPlayer = false;
          numberOfPlayers = Integer.parseInt(m.getArgs()[1]);
          players = new Player[numberOfPlayers];
@@ -368,7 +376,7 @@ public class BattleshipServer {
          shipGenHandler();
       }
 
-      if (connectedPlayers < numberOfPlayers) {
+      if (connectedPlayers < numberOfPlayers && !gameStarted && !gameEnded) {
          if (!nameTaken(m.getArgs()[0])) {
             m.getSender().setName(m.getArgs()[0]);
             int playerSlot = findFirstOpenPlace();
@@ -453,24 +461,28 @@ public class BattleshipServer {
    }
 
    private void sendMsgToPlayers(Message m) {
-      String code = PLAYER_MESSAGE;
-      if (m.getSender().getName().equals(server.getName())) {
-         code = SYSTEM_MESSAGE;
-      }
-
       String message = m.getSender().getName();
       message += ": " + m.getArgs()[0];
       message = escape(message);
-      message += SEPARATOR_TOKEN + connectedPlayers;
+
+      String code = PLAYER_MESSAGE;
+      if (m.getSender().getName().equals(server.getName())) {
+         code = SYSTEM_MESSAGE;
+         message += SEPARATOR_TOKEN + connectedPlayers;
+      }
 
       message = code + " " + message;
 
       //System.out.println("message:" + message);
 
+      sendMessageToPlayers(message);
+   }
+
+   private void sendMessageToPlayers(String message) {
       for (Player p : players) {
          if (p != null) {
             try {
-               p.sendMessageToPlayer(message + CRLF);
+               p.sendMessageToPlayer(message);
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, "Could not reach player", ex);
             }
@@ -495,7 +507,7 @@ public class BattleshipServer {
    }
 
    private void shipGenHandler() {
-      shipGen = new ShipGenerator(numberOfPlayers, shipsPerPlayer, lengths, MAP_HEIGHT, MAP_WDITH);
+      shipGen = new ShipGenerator(numberOfPlayers, shipsPerPlayer, lengths, MAP_HEIGHT, MAP_WIDTH);
 //System.out.println(shipGen.getMapAsString());
       String[] shipArray = shipGen.getShipsAsStrings();
       int i = 0;
@@ -506,7 +518,7 @@ public class BattleshipServer {
 
          for (int j = 0; j < compartments.length; j++) {
             compartments[j] = new Compartment(Integer.parseInt(pairs[j * 2]), Integer.parseInt(pairs[j * 2 + 1]), ships[i]);
-            
+
             map[compartments[j].getRow()][compartments[j].getCol()] = compartments[j];
          }
 
@@ -530,7 +542,7 @@ public class BattleshipServer {
          while (run) {
             try {
                Socket s = listen.accept();
-               s.setSoTimeout(timeout);
+               //s.setSoTimeout(timeout);
                new Thread(new Player(s)).start();
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
@@ -549,12 +561,14 @@ public class BattleshipServer {
       private BufferedReader fromPlayer;
       private DataOutputStream toPlayer;
       private boolean allShipsSunk = false;
+      private boolean run = true;
+      private boolean isRegistered = false;
 
       public Player(Socket socket) throws IOException {
          this.socket = socket;
          fromPlayer = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
          toPlayer = new DataOutputStream(this.socket.getOutputStream());
-         
+
          sendMessageToPlayer(ACK_CONNECTION + " " + PROTOTCOL_VERSION + CRLF);
       }
 
@@ -585,8 +599,19 @@ public class BattleshipServer {
          return (score += addlPoints);
       }
 
+      public boolean isRegistered() {
+         return isRegistered;
+      }
+
+      public void setRegistered(boolean status) {
+         this.isRegistered = status;
+      }
+
       public String listenToPlayer() throws IOException {
-         return fromPlayer.readLine();
+         if (!socket.isClosed()) {
+            return fromPlayer.readLine();
+         }
+         return null;
       }
 
       public void sendMessageToPlayer(String msg) throws IOException {
@@ -594,13 +619,16 @@ public class BattleshipServer {
          if (!msg.endsWith(CRLF)) {
             msg += CRLF;
          }
-         if(!socket.isClosed()) {
+         if (!socket.isClosed()) {
             toPlayer.writeBytes(msg);
          }
 
          if (msg.startsWith(ACK_BYE)) {
-            toPlayer.flush();
+            System.out.println("bye ack'd");
             close();
+         } else if (msg.startsWith(ACK_ELO_ACCEPT)) {
+            System.out.println("is now registered");
+            setRegistered(true);
          }
       }
 
@@ -614,44 +642,54 @@ public class BattleshipServer {
             s.setOwner(name);
          }
       }
-      
+
       public boolean allShipsSunk() {
-         if(!allShipsSunk) {
+         if (!allShipsSunk) {
             boolean evenASingleShipRemainsAfloat = false;
-            for(Ship s : fleet) {
-               if(!s.isSunk()) {
+            for (Ship s : fleet) {
+               if (!s.isSunk()) {
                   evenASingleShipRemainsAfloat = true;
                }
             }
             allShipsSunk = !evenASingleShipRemainsAfloat;
          }
-         
+
          return allShipsSunk;
       }
 
       @Override
       public void run() {
          String input = "";
-         boolean run = true;
-         while (run) {
+
+         while (this.run) {
             try {
                input = listenToPlayer();
 
                System.out.println(input);
-               
-               if(input == null) {
+
+               if (input == null) {
                   input = BYE;
                }
             } catch (SocketException e) {
-               System.out.println("here!");
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, e);
                input = BYE;
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
 
-            run = addMessageToQueue(input);
+            Message m = parseInput(input);
+            if (m != null) {
+               if (isRegistered || m.getCommand().equals(ELO) || m.getCommand().equals(BYE)) {
+                  addMessageToQueue(m);
+               }
+               if (BYE.equals(m.getCommand())) {
+                  System.out.println("shutdown");
+                  this.run = false;
+               }
+            }
          }
+
+         System.out.println("shutdown 2");
       }
 
       private void close() {
@@ -663,44 +701,133 @@ public class BattleshipServer {
             Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
          }
       }
-      
-      private boolean addMessageToQueue(String input) {
-         System.out.println("input:"+input);
-         boolean keepGoing = true;
-         if (input.startsWith(ELO) || input.startsWith(MSG) || input.startsWith(FIR) || (BYE.equals(input))) {
 
-            String cmd;
-            String[] args = {""};
-            if ((BYE.equals(input))) {
-               cmd = input;
-               keepGoing = false;
-            } else {
-               cmd = input.substring(0, input.indexOf(" "));
-               String arguments = input.substring(input.indexOf(" ")).trim();
+      private Message parseInput(String input) {
+         System.out.println("input:" + input);
 
-               arguments = arguments.replace("\\" + SEPARATOR_TOKEN, "\\" + TEMP_TOKEN);
-               args = arguments.split(SEPARATOR_TOKEN);
-
-               for (int i = 0; i < args.length; i++) {
-                  args[i] = args[i].replace("\\" + TEMP_TOKEN, SEPARATOR_TOKEN);
-                  System.out.println("args[" + i + "]:" + args[i]);
-               }
-            }
-
-            Message m = new Message(this, cmd, args);
-            synchronized (msgQueue) {
-               msgQueue.add(m);
-               msgQueue.notify();
-            }
-         } else if ("".equals(input)) {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "No message from client");
-         } else {
-            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Unknown message from client: {0}", input);
+         Message m;
+         String cmd;
+         String arguments;
+         int posOfSpace = input.indexOf(" ");
+         System.out.println("pos: " + posOfSpace);
+         if (posOfSpace == lengthOfCmds) {//it may be a command other than BYE
+            cmd = input.substring(0, posOfSpace).toUpperCase();
+            arguments = input.substring(posOfSpace).trim();
+         } else if (posOfSpace == -1) {//it may be BYE
+            cmd = input.toUpperCase();
+            arguments = "";
+         } else {//it doesn't fit any recognized command--period
+            cmd = null;
+            arguments = "";
          }
 
-         System.out.println(
-                 "keep going: " + keepGoing);
-         return keepGoing;
+         System.out.println("cmd: " + cmd);
+         String[] args = splitArguments(cmd, arguments);
+
+         if (isValidCommand(cmd) && validateArguments(cmd, args)) {
+            m = new Message(this, cmd, args);
+         } else {
+            Logger.getLogger(BattleshipServer.class.getName()).log(Level.WARNING, "Unrecognized command or arguments: {0}", input);
+            m = null;
+         }
+
+         return m;
+      }
+
+      private boolean isValidCommand(String cmd) {
+         return (ELO.equals(cmd) || MSG.equals(cmd) || FIR.equals(cmd) || BYE.equals(cmd));
+      }
+
+      private String[] splitArguments(String cmd, String args) {
+         String[] argsA = null;
+         if (ELO.equals(cmd)) {
+            args = args.replace("\\" + SEPARATOR_TOKEN, "\\" + TEMP_TOKEN);
+
+            argsA = args.split(SEPARATOR_TOKEN);
+
+            for (int i = 0; i < argsA.length; i++) {
+               argsA[i] = argsA[i].replace("\\" + TEMP_TOKEN, SEPARATOR_TOKEN);
+            }
+         } else if (FIR.equals(cmd)) {
+            argsA = args.toUpperCase().split(SEPARATOR_TOKEN);
+         } else if (MSG.equals(cmd)) {
+            args = args.replace("\\", "");
+            argsA = new String[1];
+            argsA[0] = args;
+         } else {//BYE
+            argsA = new String[1];
+            argsA[0] = "";
+         }
+
+         return argsA;
+      }
+
+      private boolean validateArguments(String cmd, String[] args) {
+         if (ELO.equals(cmd)) {
+            boolean rightLength = args.length == 2;
+            boolean secondArgIsNumber = true;
+            try {
+               Integer.parseInt(args[1]);
+            } catch (ArrayIndexOutOfBoundsException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, "Wrong number of args", e);
+               secondArgIsNumber = false;
+            } catch (NumberFormatException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, "Second arg not a number", e);
+               secondArgIsNumber = false;
+            }
+
+            //TODO: make sure username doesn't contain malicious code
+
+            return (rightLength && secondArgIsNumber);
+         } else if (MSG.equals(cmd)) {
+
+            //TODO: make sure msg doesn't contain malicious code
+
+            return (args.length == 1);
+         } else if (FIR.equals(cmd)) {
+            boolean rightLength = args.length == 2;
+            boolean firstArgIsLetter = false;
+            try {
+               firstArgIsLetter = Character.isLetter(args[0].charAt(0));
+            } catch (StringIndexOutOfBoundsException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, e);
+            }
+            boolean firstArgIsRightLength = (args[0].length() == 1);
+            boolean secondArgIsNumber = false;
+            try {
+               Integer.parseInt(args[1]);
+               secondArgIsNumber = true;
+            } catch (ArrayIndexOutOfBoundsException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, e);
+            } catch (NumberFormatException e) {
+               Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, e);
+            }
+
+            return (rightLength && firstArgIsLetter && firstArgIsRightLength && secondArgIsNumber && inBounds(args[0], args[1]));
+         } else {//BYE
+            return (args.length == 1);
+         }
+      }
+
+      private boolean inBounds(String row, String col) {
+         int rowInt;
+         int colInt;
+
+         try {
+            rowInt = alphabet.indexOf(row);
+            colInt = Integer.parseInt(col);
+         } catch (Exception e) {
+            return false;
+         }
+
+         return (rowInt >= 0 && rowInt <= MAP_HEIGHT && colInt >= 0 && colInt <= MAP_WIDTH);
+      }
+
+      private void addMessageToQueue(Message m) {
+         msgQueue.add(m);
+         synchronized (msgQueue) {
+            msgQueue.notify();
+         }
       }
    }
 
@@ -789,6 +916,9 @@ public class BattleshipServer {
 
       public void setSunk(boolean status) {
          isSunk = status;
+         for (int i = 0; i < sections.length; i++) {
+            sections[i].setHit();
+         }
       }
    }
 
@@ -826,7 +956,7 @@ public class BattleshipServer {
 
          return hit;
       }
-      
+
       public void setHit() {
          if (!isHit) {
             isHit = true;
@@ -848,6 +978,12 @@ public class BattleshipServer {
 
       public Ship getShip() {
          return ship;
+      }
+
+      @Override
+      public String toString() {
+         String x = alphabet.charAt(row) + ", " + col + ", " + isHit;
+         return x;
       }
    }
 }
