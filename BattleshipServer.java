@@ -172,24 +172,6 @@ public class BattleshipServer {
    }
 
    private void fire(Message m) {
-      //get coordinates from message
-      //lookup
-      //if hit
-      //set attackermsg to 'hit'
-      //set compartment to hit
-      //set defendermsg to 'hit'
-      //check if ship is sunk
-      //set ship to sunk
-      //set attackermsg to 'sunk'
-      //set defendermsg to 'sunk'
-      //check if all ships sunk
-      //set defendermsg to 'all-sunk'
-      //check if ship is shooter's
-      //set attackermsg to 'self-hit'
-      //inform shipOwner
-      //else
-      //set attackermsg to 'miss'
-      //inform attacker
 
       if (!gameStarted) {
          System.out.println("game not started");
@@ -408,9 +390,6 @@ public class BattleshipServer {
             }
             connectedPlayers++;
 
-            String[] args = {"Player " + m.getSender().getName() + " joined the game", connectedPlayers + ""};
-            sendMsgToPlayers(new Message(server, MSG, args));
-
             Ship[] tmpShips = new Ship[shipsPerPlayer];
             for (int i = 0; i < tmpShips.length; i++) {
                tmpShips[i] = ships[i + ((playerSlot) * shipsPerPlayer)];
@@ -430,6 +409,9 @@ public class BattleshipServer {
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
+            
+            String[] args = {"Player " + m.getSender().getName() + " joined the game", connectedPlayers + ""};
+            sendMsgToPlayers(new Message(server, MSG, args));
 
             if (connectedPlayers == numberOfPlayers) {
                gameStarted = true;
@@ -558,6 +540,7 @@ public class BattleshipServer {
                Socket s = listen.accept();
                //s.setSoTimeout(timeout);
                new Thread(new Player(s)).start();
+               System.out.println("new player connected");
             } catch (IOException ex) {
                Logger.getLogger(BattleshipServer.class.getName()).log(Level.SEVERE, null, ex);
             }
